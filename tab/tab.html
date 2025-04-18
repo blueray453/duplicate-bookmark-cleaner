@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Duplicate Bookmark Cleaner</title>
+  <link rel="stylesheet" href="tab.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Duplicate Bookmark Cleaner</h1>
+      <div class="controls">
+        <div class="options">
+          <div class="option-item">
+            <input type="checkbox" id="matchTitle">
+            <label for="matchTitle">Match bookmarks with same title</label>
+          </div>
+          <div class="option-item">
+            <input type="checkbox" id="matchBaseUrl">
+            <label for="matchBaseUrl">Match URLs without query parameters (?...)</label>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="findButton">Find Duplicates</button>
+          <button id="selectAllButton" class="hidden">Select All</button>
+          <button id="deleteSelected" class="hidden">Delete Selected</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div id="loading" class="hidden">Scanning bookmarks...</div>
+      
+      <div id="resultsContainer">
+        <div id="summary"></div>
+        <div id="duplicatesList"></div>
+      </div>
+    </main>
+  </div>
+  <script src="tab.js"></script>
+</body>
+</html>
