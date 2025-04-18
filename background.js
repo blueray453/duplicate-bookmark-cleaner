@@ -1,15 +1,11 @@
-// Global variable to track opened tab ID
 let cleanerTabId = null;
 
-// Main function to open or focus the cleaner tab
 async function openCleanerTab() {
   if (cleanerTabId) {
     try {
-      const tab = await browser.tabs.get(cleanerTabId);
       await browser.tabs.update(cleanerTabId, { active: true });
       return;
     } catch (e) {
-      // Tab was closed, proceed to create new one
       cleanerTabId = null;
     }
   }
@@ -20,7 +16,6 @@ async function openCleanerTab() {
   });
   cleanerTabId = tab.id;
 
-  // Handle tab closing
   browser.tabs.onRemoved.addListener((closedTabId) => {
     if (closedTabId === cleanerTabId) {
       cleanerTabId = null;
@@ -28,246 +23,136 @@ async function openCleanerTab() {
   });
 }
 
-// Get all bookmark folders with their paths
-// Updated getBookmarkFolders function with better error handling
 async function getBookmarkFolders() {
-    try {
-        const bookmarks = await browser.bookmarks.getTree();
-        const folders = [];
+  const bookmarks = await browser.bookmarks.getTree();
+  const folders = [];
 
-        function processNode(node, currentPath = []) {
-            // Skip root nodes that don't have titles (like the root "bookmarks" object)
-            if (node.id === "root________" || (!node.title && !node.url)) {
-                node.children?.forEach(child => processNode(child, currentPath));
-                return;
-            }
-
-            // Add folder if it's not a bookmark
-            if (!node.url) {
-                const folderName = node.title || 'Unnamed Folder';
-                const folderPath = [...currentPath, folderName];
-                folders.push({
-                    id: node.id,
-                    title: folderName,
-                    path: folderPath.join(' → ')
-                });
-            }
-
-            // Process children recursively
-            node.children?.forEach(child => {
-                const newPath = node.url ? currentPath : [...currentPath, node.title || 'Unnamed Folder'];
-                processNode(child, newPath);
-            });
-        }
-
-        bookmarks.forEach(root => processNode(root));
-        return { success: true, folders };
-    } catch (error) {
-        console.error("Error getting folders:", error);
-        return { success: false, error: error.message };
+  function processNode(node, currentPath = []) {
+    if (!node.url && node.children) {
+      const folderPath = [...currentPath, node.title || 'Unnamed Folder'];
+      folders.push({
+        id: node.id,
+        title: node.title || 'Unnamed Folder',
+        path: folderPath.join(' → ')
+      });
+      node.children.forEach(child => processNode(child, folderPath));
     }
+  }
+
+  bookmarks.forEach(root => processNode(root));
+  return { success: true, folders };
 }
 
 async function findDuplicateBookmarks(options) {
-    try {
-        const bookmarks = await browser.bookmarks.getTree();
-        const allBookmarks = [];
+  const bookmarks = await browser.bookmarks.getTree();
+  let allBookmarks = [];
 
-        // Improved flatten function that tracks folder paths
-        const flattenBookmarks = (nodes, currentPath = []) => {
-            nodes.forEach(node => {
-                if (node.url) {
-                    allBookmarks.push({
-                        id: node.id,
-                        url: node.url,
-                        title: node.title || '(no title)',
-                        parentId: node.parentId,
-                        dateAdded: node.dateAdded,
-                        path: currentPath.join(' → ')
-                    });
-                } else if (node.children) {
-                    const newPath = [...currentPath, node.title || 'Unnamed Folder'];
-                    flattenBookmarks(node.children, newPath);
-                }
-            });
-        };
-
-        flattenBookmarks(bookmarks);
-
-        // Filter by folder if specified
-        let filteredBookmarks = allBookmarks;
-        if (options.folderId) {
-            filteredBookmarks = allBookmarks.filter(bookmark => {
-                return isInFolder(bookmarks, bookmark.id, options.folderId);
-            });
-
-            if (filteredBookmarks.length === 0) {
-                return {
-                    success: true,
-                    duplicates: {},
-                    count: 0,
-                    totalDuplicates: 0,
-                    message: "No bookmarks found in selected folder"
-                };
-            }
-        }
-
-        // Generate comparison keys based on options
-        const duplicates = {};
-        filteredBookmarks.forEach(bookmark => {
-            let key;
-
-            if (options.matchTitle && options.matchBaseUrl) {
-                const baseUrl = bookmark.url.split('?')[0].split('#')[0];
-                key = `${baseUrl.toLowerCase()}::${bookmark.title.toLowerCase()}`;
-            } else if (options.matchTitle) {
-                key = bookmark.title.toLowerCase();
-            } else if (options.matchBaseUrl) {
-                key = bookmark.url.split('?')[0].split('#')[0].toLowerCase();
-            } else {
-                key = bookmark.url.toLowerCase();
-            }
-
-            if (!duplicates[key]) {
-                duplicates[key] = [];
-            }
-            duplicates[key].push(bookmark);
+  function flattenBookmarks(nodes, currentPath = []) {
+    nodes.forEach(node => {
+      if (node.url) {
+        allBookmarks.push({
+          id: node.id,
+          url: node.url,
+          title: node.title || '(no title)',
+          parentId: node.parentId,
+          dateAdded: node.dateAdded,
+          path: currentPath.join(' → ')
         });
-
-        // Filter out single bookmarks
-        const result = {};
-        for (const key in duplicates) {
-            if (duplicates[key].length > 1) {
-                result[key] = duplicates[key];
-            }
-        }
-
-        return {
-            success: true,
-            duplicates: result,
-            count: Object.keys(result).length,
-            totalDuplicates: Object.values(result).reduce((sum, group) => sum + group.length - 1, 0)
-        };
-
-    } catch (error) {
-        console.error("Error finding duplicates:", error);
-        return {
-            success: false,
-            error: error.message
-        };
-    }
-}
-
-// Helper function to check folder membership
-function isInFolder(bookmarks, bookmarkId, folderId) {
-    function findNode(nodes, targetId) {
-        for (const node of nodes) {
-            if (node.id === targetId) return node;
-            if (node.children) {
-                const found = findNode(node.children, targetId);
-                if (found) return found;
-            }
-        }
-        return null;
-    }
-
-    let node = findNode(bookmarks, bookmarkId);
-    while (node) {
-        if (node.id === folderId) return true;
-        node = findNode(bookmarks, node.parentId);
-    }
-    return false;
-}
-
-// Remove selected bookmarks
-async function removeSelectedBookmarks(bookmarkIds) {
-  for (const id of bookmarkIds) {
-    await browser.bookmarks.remove(id);
-  }
-  return { count: bookmarkIds.length };
-}
-
-// Helper functions
-function flattenBookmarks(bookmarks) {
-  const result = [];
-
-  function processNode(node) {
-    if (node.url) {
-      result.push({
-        id: node.id,
-        url: node.url,
-        title: node.title || '(no title)',
-        parentId: node.parentId,
-        dateAdded: node.dateAdded
-      });
-    }
-    if (node.children) {
-      node.children.forEach(processNode);
-    }
+      } else if (node.children) {
+        const newPath = [...currentPath, node.title || 'Unnamed Folder'];
+        flattenBookmarks(node.children, newPath);
+      }
+    });
   }
 
-  bookmarks.forEach(processNode);
-  return result;
-}
+  flattenBookmarks(bookmarks);
 
-function findDuplicates(bookmarks, options) {
+  if (options.folderId) {
+    allBookmarks = allBookmarks.filter(bookmark => {
+      return isInFolder(bookmarks, bookmark.id, options.folderId);
+    });
+  }
+
   const duplicates = {};
-
-  bookmarks.forEach(bookmark => {
+  allBookmarks.forEach(bookmark => {
     let key;
-
+    
     if (options.matchTitle && options.matchBaseUrl) {
-      const baseUrl = bookmark.url.split('?')[0];
-      key = `${baseUrl}::${bookmark.title}`;
+      const baseUrl = bookmark.url.split('?')[0].split('#')[0].toLowerCase();
+      key = `${baseUrl}::${bookmark.title.toLowerCase()}`;
     } else if (options.matchTitle) {
-      key = bookmark.title;
+      key = bookmark.title.toLowerCase();
     } else if (options.matchBaseUrl) {
-      key = bookmark.url.split('?')[0];
+      key = bookmark.url.split('?')[0].split('#')[0].toLowerCase();
     } else {
-      key = bookmark.url;
+      key = bookmark.url.toLowerCase();
     }
-
+    
     if (!duplicates[key]) {
       duplicates[key] = [];
     }
     duplicates[key].push(bookmark);
   });
 
-  return duplicates;
+  const result = {};
+  for (const key in duplicates) {
+    if (duplicates[key].length > 1) {
+      result[key] = duplicates[key];
+    }
+  }
+
+  return {
+    success: true,
+    duplicates: result,
+    count: Object.keys(result).length,
+    totalDuplicates: Object.values(result).reduce((sum, group) => sum + (group.length - 1), 0)
+  };
 }
 
-function countTotalDuplicates(duplicates) {
-  return Object.values(duplicates).reduce(
-    (sum, group) => sum + (group.length - 1), 0
-  );
+function isInFolder(bookmarks, bookmarkId, folderId) {
+  function findNode(nodes, targetId) {
+    for (const node of nodes) {
+      if (node.id === targetId) return node;
+      if (node.children) {
+        const found = findNode(node.children, targetId);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  let node = findNode(bookmarks, bookmarkId);
+  while (node) {
+    if (node.id === folderId) return true;
+    node = findNode(bookmarks, node.parentId);
+  }
+  return false;
 }
 
-// Message handling
+async function removeSelectedBookmarks(bookmarkIds) {
+  try {
+    for (let i = bookmarkIds.length - 1; i >= 0; i--) {
+      await browser.bookmarks.remove(bookmarkIds[i]);
+    }
+    return { success: true, count: bookmarkIds.length };
+  } catch (error) {
+    console.error("Error deleting bookmarks:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    const handleRequest = async () => {
-        try {
-            switch (request.action) {
-                case "getFolders":
-                    return await getBookmarkFolders();
-                case "findDuplicates":
-                    const result = await findDuplicateBookmarks(request.options);
-                    if (!result.success) {
-                        console.error("Duplicate search failed:", result.error);
-                    }
-                    return result;
-                case "removeSelected":
-                    return await removeSelectedBookmarks(request.bookmarkIds);
-                case "openCleanerTab":
-                    return await openCleanerTab();
-                default:
-                    return { success: false, error: "Unknown action" };
-            }
-        } catch (error) {
-            console.error("Message handler error:", error);
-            return { success: false, error: error.message };
-        }
-    };
+  const handlers = {
+    "openCleanerTab": () => openCleanerTab(),
+    "getFolders": () => getBookmarkFolders(),
+    "findDuplicates": () => findDuplicateBookmarks(request.options),
+    "removeSelected": () => removeSelectedBookmarks(request.bookmarkIds)
+  };
 
-    handleRequest().then(sendResponse);
-    return true; // Required for async response
+  if (handlers[request.action]) {
+    handlers[request.action]()
+      .then(result => sendResponse({ success: true, ...result }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });

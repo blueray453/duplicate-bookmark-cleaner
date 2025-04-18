@@ -1,6 +1,4 @@
-document.addEventListener('DOMContentLoaded', init);
-
-function init() {
+document.addEventListener('DOMContentLoaded', () => {
   // DOM elements
   const findButton = document.getElementById('findButton');
   const selectAllButton = document.getElementById('selectAllButton');
@@ -20,12 +18,8 @@ function init() {
   loadFolders();
   setupEventListeners();
 
-  async function loadFolders() {
-    try {
-      const response = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ action: "getFolders" }, resolve);
-      });
-
+  function loadFolders() {
+    chrome.runtime.sendMessage({ action: "getFolders" }, (response) => {
       if (response?.success) {
         // Clear existing options except "All Bookmarks"
         while (folderSelect.options.length > 1) {
@@ -42,10 +36,7 @@ function init() {
       } else {
         showError(response?.error || "Failed to load folders");
       }
-    } catch (error) {
-      showError("Error loading folders: " + error.message);
-      console.error("Folder loading error:", error);
-    }
+    });
   }
 
   function setupEventListeners() {
@@ -54,40 +45,34 @@ function init() {
     deleteButton.addEventListener('click', deleteSelected);
   }
 
-  async function findDuplicates() {
+  function findDuplicates() {
     findButton.disabled = true;
     loadingDiv.classList.remove('hidden');
     clearResults();
-
+    
     const options = {
       matchTitle: matchTitleCheckbox.checked,
       matchBaseUrl: matchBaseUrlCheckbox.checked,
       folderId: folderSelect.value || null
     };
+    
+    chrome.runtime.sendMessage(
+      { action: "findDuplicates", options },
+      handleFindResponse
+    );
+  }
 
-    try {
-      const response = await new Promise((resolve) => {
-        chrome.runtime.sendMessage(
-          { action: "findDuplicates", options },
-          resolve
-        );
-      });
-
-      findButton.disabled = false;
-      loadingDiv.classList.add('hidden');
-
-      if (!response?.success) {
-        showError(response?.error || "Failed to scan bookmarks");
-        return;
-      }
-
-      if (response.message) {
-        summaryDiv.textContent = response.message;
-        return;
-      }
-
-      if (response.count === 0) {
-        summaryDiv.innerHTML = `
+  function handleFindResponse(response) {
+    findButton.disabled = false;
+    loadingDiv.classList.add('hidden');
+    
+    if (!response?.success) {
+      showError(response?.error || "Failed to find duplicates");
+      return;
+    }
+    
+    if (response.count === 0) {
+      summaryDiv.innerHTML = `
         No duplicates found with current settings.<br>
         Try adjusting these options:
         <ul>
@@ -96,35 +81,9 @@ function init() {
           <li>Enable "Match base URLs"</li>
         </ul>
       `;
-        return;
-      }
-
-      summaryDiv.textContent = `Found ${response.count} duplicate groups (${response.totalDuplicates} total duplicates)`;
-      displayDuplicates(response.duplicates);
-      selectAllButton.classList.remove('hidden');
-
-    } catch (error) {
-      findButton.disabled = false;
-      loadingDiv.classList.add('hidden');
-      showError("Error scanning bookmarks: " + error.message);
-      console.error("Find duplicates error:", error);
-    }
-  }
-
-  function handleFindResponse(response) {
-    findButton.disabled = false;
-    loadingDiv.classList.add('hidden');
-
-    if (!response || !response.success) {
-      showError(response?.error || "Failed to find duplicates");
       return;
     }
-
-    if (response.count === 0) {
-      summaryDiv.textContent = "No duplicate bookmarks found!";
-      return;
-    }
-
+    
     summaryDiv.textContent = `Found ${response.count} duplicate groups (${response.totalDuplicates} total duplicates)`;
     displayDuplicates(response.duplicates);
     selectAllButton.classList.remove('hidden');
@@ -135,96 +94,72 @@ function init() {
     allCheckboxes = [];
     allSelected = false;
     deleteButton.classList.add('hidden');
-
+    
     for (const key in duplicates) {
       const items = duplicates[key];
       if (items.length > 1) {
-        const groupDiv = createGroupElement(key, items);
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'duplicate-group';
+        
+        // Header
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'group-header';
+        headerDiv.textContent = key;
+        groupDiv.appendChild(headerDiv);
+        
+        // Items
+        const itemsDiv = document.createElement('div');
+        itemsDiv.className = 'duplicate-items';
+        
+        items.forEach((bookmark, index) => {
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'duplicate-item';
+          
+          if (index > 0) {
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'duplicate-checkbox';
+            checkbox.value = bookmark.id;
+            checkbox.addEventListener('change', updateDeleteButtonState);
+            itemDiv.appendChild(checkbox);
+            allCheckboxes.push(checkbox);
+          } else {
+            const keepSpan = document.createElement('span');
+            keepSpan.className = 'keep-marker';
+            keepSpan.textContent = '✓ KEEP';
+            itemDiv.appendChild(keepSpan);
+          }
+          
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'duplicate-info';
+          
+          const titleDiv = document.createElement('div');
+          titleDiv.className = 'duplicate-title';
+          titleDiv.textContent = bookmark.title;
+          infoDiv.appendChild(titleDiv);
+          
+          const urlDiv = document.createElement('div');
+          urlDiv.className = 'duplicate-url';
+          urlDiv.textContent = bookmark.url;
+          infoDiv.appendChild(urlDiv);
+          
+          const dateDiv = document.createElement('div');
+          dateDiv.className = 'duplicate-date';
+          dateDiv.textContent = `Added: ${new Date(bookmark.dateAdded).toLocaleString()}`;
+          infoDiv.appendChild(dateDiv);
+          
+          itemDiv.appendChild(infoDiv);
+          itemsDiv.appendChild(itemDiv);
+        });
+        
+        groupDiv.appendChild(itemsDiv);
         duplicatesList.appendChild(groupDiv);
       }
     }
-
+    
     if (allCheckboxes.length > 0) {
       deleteButton.classList.remove('hidden');
     }
-  }
-
-  function createGroupElement(key, items) {
-    const groupDiv = document.createElement('div');
-    groupDiv.className = 'duplicate-group';
-
-    groupDiv.appendChild(createHeaderElement(key));
-
-    const itemsDiv = document.createElement('div');
-    itemsDiv.className = 'duplicate-items';
-
-    items.forEach((bookmark, index) => {
-      itemsDiv.appendChild(createBookmarkElement(bookmark, index));
-    });
-
-    groupDiv.appendChild(itemsDiv);
-    return groupDiv;
-  }
-
-  function createHeaderElement(key) {
-    const headerDiv = document.createElement('div');
-    headerDiv.className = 'group-header';
-    headerDiv.textContent = key;
-    return headerDiv;
-  }
-
-  function createBookmarkElement(bookmark, index) {
-    const itemDiv = document.createElement('div');
-    itemDiv.className = 'duplicate-item';
-
-    if (index > 0) {
-      const checkbox = createCheckbox(bookmark.id);
-      itemDiv.appendChild(checkbox);
-      allCheckboxes.push(checkbox);
-    } else {
-      itemDiv.appendChild(createKeepMarker());
-    }
-
-    itemDiv.appendChild(createBookmarkInfo(bookmark));
-    return itemDiv;
-  }
-
-  function createCheckbox(id) {
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'duplicate-checkbox';
-    checkbox.value = id;
-    checkbox.addEventListener('change', updateDeleteButtonState);
-    return checkbox;
-  }
-
-  function createKeepMarker() {
-    const keepSpan = document.createElement('span');
-    keepSpan.className = 'keep-marker';
-    keepSpan.textContent = '✓ KEEP';
-    return keepSpan;
-  }
-
-  function createBookmarkInfo(bookmark) {
-    const infoDiv = document.createElement('div');
-    infoDiv.className = 'duplicate-info';
-
-    const titleDiv = document.createElement('div');
-    titleDiv.className = 'duplicate-title';
-    titleDiv.textContent = bookmark.title;
-    infoDiv.appendChild(titleDiv);
-
-    const urlDiv = document.createElement('div');
-    urlDiv.className = 'duplicate-url';
-    urlDiv.textContent = bookmark.url;
-    infoDiv.appendChild(urlDiv);
-
-    const dateDiv = document.createElement('div');
-    dateDiv.className = 'duplicate-date';
-    dateDiv.textContent = `Added: ${new Date(bookmark.dateAdded).toLocaleString()}`;
-    infoDiv.appendChild(dateDiv);
-
-    return infoDiv;
   }
 
   function toggleSelectAll() {
@@ -236,40 +171,39 @@ function init() {
     updateDeleteButtonState();
   }
 
-  function deleteSelected() {
+  async function deleteSelected() {
     const selectedIds = allCheckboxes
       .filter(checkbox => checkbox.checked)
       .map(checkbox => checkbox.value);
-
-    if (selectedIds.length === 0) {
-      alert("Please select at least one bookmark to delete");
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to delete ${selectedIds.length} selected bookmarks?`)) {
-      return;
-    }
-
+    
+    if (selectedIds.length === 0) return;
+    
     deleteButton.disabled = true;
     deleteButton.textContent = "Deleting...";
-
-    chrome.runtime.sendMessage(
-      { action: "removeSelected", bookmarkIds: selectedIds },
-      handleDeleteResponse
-    );
-  }
-
-  function handleDeleteResponse(response) {
-    deleteButton.disabled = false;
-    deleteButton.textContent = "Delete Selected";
-
-    if (!response || !response.success) {
-      showError(response?.error || "Failed to delete bookmarks");
-      return;
+    
+    try {
+      const response = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          { action: "removeSelected", bookmarkIds: selectedIds },
+          resolve
+        );
+      });
+      
+      if (!response?.success) {
+        throw new Error(response?.error || "Deletion failed");
+      }
+      
+      // Success - refresh the list
+      await findDuplicates();
+      summaryDiv.textContent = `Successfully deleted ${response.count} bookmarks`;
+      
+    } catch (error) {
+      console.error("Deletion error:", error);
+      showError("Failed to delete bookmarks: " + error.message);
+    } finally {
+      deleteButton.disabled = false;
+      deleteButton.textContent = "Delete Selected";
     }
-
-    alert(`Successfully deleted ${response.count} bookmarks!`);
-    findDuplicates();
   }
 
   function updateDeleteButtonState() {
@@ -285,7 +219,10 @@ function init() {
   }
 
   function showError(message) {
-    summaryDiv.textContent = `Error: ${message}`;
-    summaryDiv.style.color = '#d33';
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    errorDiv.textContent = message;
+    summaryDiv.innerHTML = '';
+    summaryDiv.appendChild(errorDiv);
   }
-}
+});
