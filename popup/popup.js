@@ -1,2 +1,2 @@
-browser.runtime.sendMessage({action: "openCleanerTab"});
+browser.runtime.sendMessage({ action: "openCleanerTab" });
 window.close();

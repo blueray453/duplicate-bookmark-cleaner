@@ -19,6 +19,12 @@
             <input type="checkbox" id="matchBaseUrl">
             <label for="matchBaseUrl">Match URLs without query parameters (?...)</label>
           </div>
+          <div class="option-item">
+            <label for="folderSelect">Scan in folder:</label>
+            <select id="folderSelect">
+              <option value="">All Bookmarks</option>
+            </select>
+          </div>
         </div>
         <div class="actions">
           <button id="findButton">Find Duplicates</button>
@@ -30,7 +36,6 @@
 
     <main>
       <div id="loading" class="hidden">Scanning bookmarks...</div>
-      
       <div id="resultsContainer">
         <div id="summary"></div>
         <div id="duplicatesList"></div>
